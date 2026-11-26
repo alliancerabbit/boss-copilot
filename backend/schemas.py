@@ -98,3 +98,58 @@ class AnalyzeResponse(BaseModel):
                     raise ValueError(f"打招呼语出现套话「{pattern}」：{text[:20]}…")
             cleaned.append(text)
         return cleaned
+
+
+class InterviewRequest(AnalyzeRequest):
+    """面试出题请求。字段与岗位分析完全一致，直接复用其校验规则。"""
+
+
+class InterviewQuestion(BaseModel):
+    """一道面试题及其回答思路。"""
+
+    question: str = Field(
+        ...,
+        min_length=8,
+        max_length=300,
+        description="面试官视角的提问，要具体到可追问",
+    )
+    answer_hint: str = Field(
+        ...,
+        min_length=10,
+        max_length=800,
+        description="2-4 句回答思路：先讲什么、用什么案例、落到哪个指标",
+    )
+
+    @field_validator("question", "answer_hint")
+    @classmethod
+    def _strip_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("不能为空白字符")
+        return value
+
+
+class InterviewResponse(BaseModel):
+    """8 道题按三类固定配比，少一道或多一道都视为模型输出不合格。"""
+
+    project_questions: list[InterviewQuestion] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description="深挖简历项目的技术题，3 道",
+    )
+    gap_questions: list[InterviewQuestion] = Field(
+        ...,
+        min_length=3,
+        max_length=3,
+        description="针对岗位要求与简历短板的考察题，3 道",
+    )
+    scenario_questions: list[InterviewQuestion] = Field(
+        ...,
+        min_length=2,
+        max_length=2,
+        description="业务场景设计题，2 道",
+    )
+
+    def all_questions(self) -> list[InterviewQuestion]:
+        return [*self.project_questions, *self.gap_questions, *self.scenario_questions]

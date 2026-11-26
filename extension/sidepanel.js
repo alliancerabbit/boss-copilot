@@ -4,6 +4,7 @@
  */
 
 const API_URL = "http://127.0.0.1:8000/api/analyze";
+const INTERVIEW_URL = "http://127.0.0.1:8000/api/interview";
 const COPY_RESET_MS = 1600;
 
 const SOURCE_LABEL = {
@@ -15,6 +16,7 @@ const SOURCE_LABEL = {
 
 const els = {
   button: document.getElementById("analyzeBtn"),
+  interviewBtn: document.getElementById("interviewBtn"),
   status: document.getElementById("status"),
   result: document.getElementById("result"),
   jobTitle: document.getElementById("jobTitle"),
@@ -26,6 +28,9 @@ const els = {
   gaps: document.getElementById("gaps"),
   greetings: document.getElementById("greetings"),
   meta: document.getElementById("meta"),
+  interview: document.getElementById("interview"),
+  interviewMeta: document.getElementById("interviewMeta"),
+  interviewBody: document.getElementById("interviewBody"),
 };
 
 class ApiError extends Error {
@@ -49,10 +54,14 @@ function setStatus(kind, text) {
   els.status.textContent = text;
 }
 
-function setLoading(loading) {
-  els.button.disabled = loading;
-  els.button.classList.toggle("loading", loading);
-  els.button.textContent = loading ? "分析中" : "分析当前岗位";
+function setBusy(mode) {
+  const busy = Boolean(mode);
+  els.button.disabled = busy;
+  els.interviewBtn.disabled = busy;
+  els.button.classList.toggle("loading", mode === "analyze");
+  els.interviewBtn.classList.toggle("loading", mode === "interview");
+  els.button.textContent = mode === "analyze" ? "分析中" : "分析当前岗位";
+  els.interviewBtn.textContent = mode === "interview" ? "生成中" : "生成面试题";
 }
 
 function scoreColor(score) {
@@ -228,7 +237,7 @@ function describeError(error) {
 async function analyze() {
   if (els.button.disabled) return;
 
-  setLoading(true);
+  setBusy("analyze");
   els.result.hidden = true;
   setStatus("info", "正在读取当前页面…");
 
@@ -256,8 +265,88 @@ async function analyze() {
   } catch (error) {
     setStatus("error", describeError(error));
   } finally {
-    setLoading(false);
+    setBusy(null);
+  }
+}
+
+const INTERVIEW_GROUPS = [
+  ["project_questions", "简历项目深挖"],
+  ["gap_questions", "岗位短板追问"],
+  ["scenario_questions", "业务场景设计"],
+];
+
+function isValidInterview(data) {
+  return data && INTERVIEW_GROUPS.every(([key]) => Array.isArray(data[key]));
+}
+
+function renderInterview(job, data) {
+  const total = INTERVIEW_GROUPS.reduce((sum, [key]) => sum + data[key].length, 0);
+  els.interviewMeta.textContent = `${total} 题`;
+  els.interviewBody.replaceChildren();
+
+  INTERVIEW_GROUPS.forEach(([key, label]) => {
+    const items = data[key];
+    if (!items.length) return;
+
+    const title = document.createElement("h3");
+    title.className = "group-title";
+    title.textContent = `${label} · ${items.length} 题`;
+    els.interviewBody.appendChild(title);
+
+    items.forEach((item, index) => {
+      const card = document.createElement("details");
+      card.className = "q";
+
+      const summary = document.createElement("summary");
+      const order = document.createElement("span");
+      order.className = "qno";
+      order.textContent = `${index + 1}.`;
+      summary.append(order, document.createTextNode(item.question));
+
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = item.answer_hint;
+
+      card.append(summary, hint);
+      els.interviewBody.appendChild(card);
+    });
+  });
+
+  els.interview.hidden = false;
+  els.interview.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function generateInterview() {
+  if (els.interviewBtn.disabled) return;
+
+  setBusy("interview");
+  els.interview.hidden = true;
+  setStatus("info", "正在读取当前页面…");
+
+  try {
+    const job = await extractJob();
+    setStatus("info", `已获取「${job.job_title}」，正在生成 8 道面试题（约 10 秒）…`);
+
+    const response = await fetch(INTERVIEW_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_title: job.job_title, jd_text: job.jd_text }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiError(response.status, payload.detail);
+    if (!isValidInterview(payload)) {
+      throw new Error("后端返回结构异常：缺少 project_questions / gap_questions / scenario_questions。");
+    }
+
+    renderInterview(job, payload);
+    setStatus("", "");
+  } catch (error) {
+    setStatus("error", describeError(error));
+  } finally {
+    setBusy(null);
   }
 }
 
 els.button.addEventListener("click", analyze);
+els.interviewBtn.addEventListener("click", generateInterview);

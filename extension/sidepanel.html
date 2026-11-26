@@ -252,6 +252,114 @@
         font-size: 11.5px;
         color: var(--muted);
       }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .actions .btn {
+        width: auto;
+        flex: 1;
+      }
+
+      .actions .btn.ghost {
+        flex: none;
+        width: 116px;
+        background: #fff;
+        color: var(--primary);
+        border: 1px solid #cfdcff;
+        font-size: 13px;
+      }
+
+      .actions .btn.ghost:hover:not(:disabled) {
+        background: #f2f6ff;
+      }
+
+      .actions .btn.ghost.loading::before {
+        border-color: rgba(37, 99, 235, 0.3);
+        border-top-color: var(--primary);
+      }
+
+      .section-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 4px 8px;
+        flex-wrap: wrap;
+        margin: 20px 0 10px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-size: 13px;
+        letter-spacing: 0.2px;
+      }
+
+      .section-head .badge {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .group-title {
+        margin: 14px 0 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      details.q {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        padding: 10px 12px;
+        margin-bottom: 8px;
+      }
+
+      details.q summary {
+        cursor: pointer;
+        font-size: 13px;
+        line-height: 1.55;
+        list-style: none;
+        position: relative;
+        padding-right: 18px;
+      }
+
+      details.q summary::-webkit-details-marker {
+        display: none;
+      }
+
+      details.q summary::after {
+        content: "▾";
+        position: absolute;
+        right: 0;
+        top: 0;
+        color: var(--muted);
+        transition: transform 0.15s ease;
+      }
+
+      details.q[open] summary::after {
+        transform: rotate(180deg);
+      }
+
+      details.q .hint {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--line);
+        font-size: 12.5px;
+        line-height: 1.65;
+        color: #3d4450;
+      }
+
+      .qno {
+        display: inline-block;
+        min-width: 18px;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
     </style>
   </head>
   <body>
@@ -260,7 +368,10 @@
         <h1>BossCopilot</h1>
         <span>JD 匹配助手</span>
       </div>
-      <button id="analyzeBtn" class="btn" type="button">分析当前岗位</button>
+      <div class="actions">
+        <button id="analyzeBtn" class="btn" type="button">分析当前岗位</button>
+        <button id="interviewBtn" class="btn ghost" type="button">生成面试题</button>
+      </div>
     </div>
 
     <main>
@@ -297,6 +408,14 @@
           <div id="greetings"></div>
           <p id="meta" class="meta"></p>
         </section>
+      </section>
+
+      <section id="interview" hidden>
+        <div class="section-head">
+          <h2>面试模拟题</h2>
+          <span id="interviewMeta" class="badge"></span>
+        </div>
+        <div id="interviewBody"></div>
       </section>
     </main>
 

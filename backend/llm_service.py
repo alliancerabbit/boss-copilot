@@ -19,9 +19,9 @@ from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 try:  # 作为包导入（uvicorn backend.main:app）
-    from .schemas import AnalyzeResponse
+    from .schemas import AnalyzeResponse, InterviewResponse
 except ImportError:  # 从 backend/ 目录直接启动（uvicorn main:app）
-    from schemas import AnalyzeResponse
+    from schemas import AnalyzeResponse, InterviewResponse
 
 BACKEND_DIR = Path(__file__).resolve().parent
 ENV_PATH = BACKEND_DIR / ".env"
@@ -170,3 +170,145 @@ def analyze_jd(job_title: str, jd_text: str) -> AnalyzeResponse:
             last_error = exc
 
     raise LLMServiceError(f"模型输出未通过结构校验（已尝试 {MAX_ATTEMPTS} 次）：{last_error}")
+
+
+def _model_name() -> str:
+    return os.getenv("DEEPSEEK_MODEL", "").strip() or DEFAULT_MODEL
+
+
+def chat_json(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    max_tokens: int = 1500,
+    temperature: float = 0.7,
+) -> dict:
+    """单次 JSON Mode 调用并解析为 dict。供出题、技能抽取等场景复用。"""
+    client = _build_client()
+    try:
+        completion = client.chat.completions.create(
+            model=_model_name(),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except OpenAIError as exc:
+        raise LLMServiceError(f"调用 DeepSeek 失败：{exc}") from exc
+
+    raw = ""
+    if completion.choices:
+        raw = (completion.choices[0].message.content or "").strip()
+
+    try:
+        return _extract_json(raw)
+    except json.JSONDecodeError as exc:
+        raise LLMServiceError(f"模型返回的 JSON 无法解析：{exc}") from exc
+
+
+INTERVIEW_SYSTEM_PROMPT = """你是一位带过多年团队的资深技术面试官，擅长一场面试就摸清候选人的真实水平。
+
+只输出一个 JSON 对象，不要 Markdown 代码块，不要解释文字，字段与配比严格如下：
+
+{
+  "project_questions": [{"question": "...", "answer_hint": "..."}, ...共 3 条],
+  "gap_questions":     [{"question": "...", "answer_hint": "..."}, ...共 3 条],
+  "scenario_questions":[{"question": "...", "answer_hint": "..."}, ...共 2 条]
+}
+
+出题规则：
+1. project_questions（3 条）：只从【简历】里的具体项目/经历出发，必须点到真实的技术选型或数字，例如"订单接口 P99 从 480ms 到 120ms，具体改了哪几层"。禁止"介绍一下你的项目""你最大的挑战是什么"这类泛问。
+2. gap_questions（3 条）：挑【JD】明确要求、而【简历】明显薄弱或缺失的点出题，像真实面试官那样连续追问细节，目的是逼出真实水平而不是让人背答案。
+3. scenario_questions（2 条）：结合该岗位的真实业务场景出开放设计题，考察方案取舍与拆解能力（例如"如果让你在现有系统上落地 XX，你会怎么分阶段做"）。不要问八股文。
+4. answer_hint：每题 2-4 句，写"答题结构"而不是标准答案——先给结论或思路，再指一个简历里的具体案例，最后落到指标、取舍或风险。
+5. 语言：简体中文。题目 ≤60 字，思路 ≤120 字。总共 8 条，数量不能多也不能少。"""
+
+INTERVIEW_USER_TEMPLATE = """【岗位】
+{job_title}
+
+【JD 原文】
+{jd_text}
+
+【简历】
+{resume}
+
+请按系统要求输出 JSON。"""
+
+
+def generate_interview_questions(job_title: str, jd_text: str) -> InterviewResponse:
+    """生成 8 道面试题（3 项目深挖 + 3 短板追问 + 2 场景设计）。"""
+    resume = load_resume()
+    base_prompt = INTERVIEW_USER_TEMPLATE.format(
+        job_title=job_title, jd_text=jd_text, resume=resume
+    )
+
+    last_error: Exception | None = None
+    for _ in range(MAX_ATTEMPTS):
+        prompt = base_prompt
+        if last_error is not None:
+            prompt += (
+                f"\n\n上一次输出不合格（{last_error}）。"
+                "请重新输出，字段名不变，严格 3/3/2 配比，不要多写解释。"
+            )
+        try:
+            payload = chat_json(
+                INTERVIEW_SYSTEM_PROMPT, prompt, max_tokens=2200, temperature=0.6
+            )
+            return InterviewResponse.model_validate(payload)
+        except (LLMServiceError, ValidationError, ValueError) as exc:
+            last_error = exc
+
+    raise LLMServiceError(f"面试题未通过结构校验（已尝试 {MAX_ATTEMPTS} 次）：{last_error}")
+
+
+SKILL_SYSTEM_PROMPT = """你是技术招聘数据标注员，负责把 JD 文本归一化成标准技能标签。
+
+只输出 JSON：{"skills": ["...", "..."]}
+
+规则：
+1. 只抽硬技能：编程语言、框架、中间件、数据库、云与基础设施、架构或方法论（如 RAG、微服务、Agent）、领域工具。不要抽软技能、学历、工作年限、公司名、岗位名、薪资。
+2. 统一成行业通用写法，例如 Python、FastAPI、MySQL、Redis、Elasticsearch、Docker、Kubernetes、RAG、Milvus、ClickHouse、Celery、LangChain。
+3. 同义合并：「大模型」并入 LLM，「向量数据库」「Milvus」「FAISS」若语境是检索，统一为「向量检索」。
+4. 去重，保持出现顺序，最多 {limit} 个；文本里没有相关技能就返回空数组。
+5. 严禁编造文本中未出现的技能。"""
+
+
+def extract_skills(text: str, *, max_skills: int = 12) -> list[str]:
+    """从 JD / 简历文本中抽取标准化技能关键词。
+
+    上限按用途区分：JD 只看核心要求（12 个够），简历要尽量全（建议 40），
+    否则简历里的后半段技能会被截断，缺口对比就会误报。
+    """
+    if not text or not text.strip():
+        return []
+
+    payload = chat_json(
+        SKILL_SYSTEM_PROMPT.replace("{limit}", str(max_skills)),
+        f"【文本】\n{text[:6000]}",
+        max_tokens=400 if max_skills <= 15 else 900,
+        temperature=0.1,
+    )
+
+    raw = payload.get("skills")
+    if not isinstance(raw, list):
+        return []
+
+    seen: set[str] = set()
+    skills: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        name = item.strip().strip("，,。;；、")
+        if not name or len(name) > 40:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        skills.append(name)
+        if len(skills) >= max_skills:
+            break
+    return skills

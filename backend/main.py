@@ -28,16 +28,18 @@ try:  # 作为包导入（uvicorn backend.main:app）
         ConfigurationError,
         LLMServiceError,
         analyze_jd,
+        generate_interview_questions,
     )
-    from .schemas import AnalyzeRequest, AnalyzeResponse
+    from .schemas import AnalyzeRequest, AnalyzeResponse, InterviewRequest, InterviewResponse
 except ImportError:  # 从 backend/ 目录启动（uvicorn main:app）
     from llm_service import (
         RESUME_PATH,
         ConfigurationError,
         LLMServiceError,
         analyze_jd,
+        generate_interview_questions,
     )
-    from schemas import AnalyzeRequest, AnalyzeResponse
+    from schemas import AnalyzeRequest, AnalyzeResponse, InterviewRequest, InterviewResponse
 
 BACKEND_DIR = Path(__file__).resolve().parent
 DATA_DIR = BACKEND_DIR / "data"
@@ -115,6 +117,17 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
         logger.warning("写入 %s 失败：%s", JOBS_LOG, exc)
 
     return result
+
+
+@app.post("/api/interview", response_model=InterviewResponse)
+def interview(request: InterviewRequest) -> InterviewResponse:
+    """按 JD + 简历生成 8 道面试题：3 项目深挖 + 3 短板追问 + 2 场景设计。"""
+    try:
+        return generate_interview_questions(request.job_title, request.jd_text)
+    except ConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 if __name__ == "__main__":
