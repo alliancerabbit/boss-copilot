@@ -95,6 +95,17 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`。
 | API Key（侧边栏） | 浏览器 `chrome.storage.local` | 仅本机，不上传 |
 | 分析结果 | 只在本机进程内传递 | 仅追加到本地 jsonl |
 
+后端只接受来自扩展页面的跨域请求（CORS 限定 `chrome-extension://<id>`），并校验 `Host` 头必须是 `127.0.0.1` / `localhost` / `::1`。这样即使你在开着后端时访问了恶意网页，对方也读不到简历、消耗不了额度，DNS rebinding 同样被挡住。
+
+## 🧪 开发与测试
+
+```bash
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.venv\Scripts\python.exe -m pytest backend/tests -v
+```
+
+安全回归测试覆盖 5 项：恶意来源读简历被拒、扩展来源放行、恶意预检被拒、非回环 Host 拒绝、健康检查不泄露本机路径。
+
 ## 📄 License
 
 [MIT](LICENSE)

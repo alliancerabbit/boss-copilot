@@ -29,8 +29,9 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 try:  # 作为包导入（uvicorn backend.main:app）
     from .llm_service import (
@@ -95,15 +96,36 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Chrome 扩展的 side panel 发出的请求，Origin 形如 chrome-extension://<扩展ID>，
-# 扩展 ID 在开发期会变，因此放开来源；不带 Cookie，故 allow_credentials 必须为 False。
+# Chrome 扩展页面的 Origin 形如 chrome-extension://<32 位 a-p 字符>。
+# 只放行这一类来源：本地服务持有简历与 API Key，不能对任意网站开放。
+EXTENSION_ORIGIN_PATTERN = r"^chrome-extension://[a-p]{32}$"
+
+# 只允许本机回环地址作为 Host，挡住 DNS rebinding（把域名解析到 127.0.0.1 后同源访问）。
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=EXTENSION_ORIGIN_PATTERN,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key", "X-Base-URL", "X-Model-Name"],
 )
+
+
+def _hostname_of(host_header: str) -> str:
+    """取出 Host 头里的主机名，兼容 IPv6 的 [::1]:8000 写法。"""
+    host = (host_header or "").strip().lower()
+    if host.startswith("[") and "]" in host:
+        return host[1 : host.index("]")]
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+@app.middleware("http")
+async def guard_host(request: Request, call_next):
+    """Host 必须是回环地址。测试时请用 TestClient(base_url="http://127.0.0.1:8000")。"""
+    if _hostname_of(request.headers.get("host", "")) not in ALLOWED_HOSTS:
+        return JSONResponse(status_code=400, content={"detail": "Invalid Host header"})
+    return await call_next(request)
 
 
 def append_job_record(record: dict) -> None:
@@ -116,11 +138,12 @@ def append_job_record(record: dict) -> None:
 
 @app.get("/api/health")
 def health() -> dict:
+    # 只回文件名，不回绝对路径：路径里含 Windows 用户名，属于不必要的信息暴露
     return {
         "status": "ok",
         "resume_loaded": RESUME_PATH.exists(),
         "api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY", "").strip()),
-        "log_file": str(JOBS_LOG),
+        "log_file": JOBS_LOG.name,
     }
 
 
