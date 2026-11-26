@@ -70,8 +70,15 @@ function scoreLabel(score) {
 }
 
 async function getActiveTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // 侧边栏自身获得焦点时 currentWindow 未必是目标窗口，lastFocusedWindow 更稳
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab || !tab.id) throw new Error("找不到当前标签页。");
+
+  // 浏览器内部页面无法注入脚本，提前拦下并说清原因（这也是申请 tabs 权限的用处）
+  if (/^(chrome|edge|about|devtools|chrome-extension):/i.test(tab.url || "")) {
+    throw new Error(`当前是浏览器内部页面（${tab.url}），请在 Boss 直聘岗位详情页使用。`);
+  }
+
   return tab;
 }
 
@@ -94,9 +101,12 @@ async function extractJob() {
       });
       data = second && second.result;
     }
-  } catch {
+  } catch (error) {
+    // 把 Chrome 的原始报错带上，否则永远只能看到一句笼统的"无法读取"
+    const reason = error && error.message ? `（${error.message}）` : "";
     throw new Error(
-      "无法读取当前页面。请在目标页面上重新点击工具栏的 BossCopilot 图标打开侧边栏（浏览器需要重新授权当前标签页），chrome:// 等内部页面不支持注入。"
+      `无法读取当前页面${reason}。请确认当前标签页是 Boss 直聘岗位页（https://*.zhipin.com），` +
+        "并在该页面上重新点击工具栏的 BossCopilot 图标后再试。"
     );
   }
 
