@@ -7,10 +7,14 @@
 接口：
     POST /api/analyze        JD + 简历 → 匹配度、优势、短板、打招呼语
     POST /api/interview      JD + 简历 → 8 道面试题
+    POST /api/test-connection 用请求头里的 Key / Base URL / Model 探活
     GET  /api/resume         读取当前简历
     POST /api/resume         保存粘贴/微调后的简历
     POST /api/resume/upload  上传 .pdf / .md / .txt 简历并解析
     GET  /api/health         自检（简历是否存在、密钥是否已配）
+
+模型配置支持 BYOK：请求头 X-API-Key / X-Base-URL / X-Model-Name 优先，
+缺哪项就用 backend/.env 里的默认值补哪项。
 """
 
 from __future__ import annotations
@@ -25,16 +29,18 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 try:  # 作为包导入（uvicorn backend.main:app）
     from .llm_service import (
         RESUME_PATH,
         ConfigurationError,
+        LLMConfig,
         LLMServiceError,
         analyze_jd,
         generate_interview_questions,
+        probe_connection,
     )
     from .schemas import (
         AnalyzeRequest,
@@ -43,14 +49,17 @@ try:  # 作为包导入（uvicorn backend.main:app）
         InterviewResponse,
         ResumeState,
         ResumeText,
+        TestConnectionResult,
     )
 except ImportError:  # 从 backend/ 目录启动（uvicorn main:app）
     from llm_service import (
         RESUME_PATH,
         ConfigurationError,
+        LLMConfig,
         LLMServiceError,
         analyze_jd,
         generate_interview_questions,
+        probe_connection,
     )
     from schemas import (
         AnalyzeRequest,
@@ -59,6 +68,7 @@ except ImportError:  # 从 backend/ 目录启动（uvicorn main:app）
         InterviewResponse,
         ResumeState,
         ResumeText,
+        TestConnectionResult,
     )
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -114,10 +124,31 @@ def health() -> dict:
     }
 
 
+def llm_overrides(
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_base_url: str | None = Header(default=None, alias="X-Base-URL"),
+    x_model_name: str | None = Header(default=None, alias="X-Model-Name"),
+) -> LLMConfig:
+    """把请求头里的 BYOK 配置收成一个对象。没传的字段留空，交给 .env 兜底。"""
+    return LLMConfig(
+        api_key=(x_api_key or "").strip(),
+        base_url=(x_base_url or "").strip(),
+        model=(x_model_name or "").strip(),
+    )
+
+
+@app.post("/api/test-connection", response_model=TestConnectionResult)
+def test_connection(config: LLMConfig = Depends(llm_overrides)) -> TestConnectionResult:
+    """发一句 "hi" 验证 Key / Base URL / 模型名，失败也返回 200 + 原始报错。"""
+    return TestConnectionResult(**probe_connection(config))
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+def analyze(
+    request: AnalyzeRequest, config: LLMConfig = Depends(llm_overrides)
+) -> AnalyzeResponse:
     try:
-        result = analyze_jd(request.job_title, request.jd_text)
+        result = analyze_jd(request.job_title, request.jd_text, config=config)
     except ConfigurationError as exc:
         # 缺密钥 / 缺简历：环境问题，让调用方知道该去配什么
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -140,10 +171,14 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
 
 
 @app.post("/api/interview", response_model=InterviewResponse)
-def interview(request: InterviewRequest) -> InterviewResponse:
+def interview(
+    request: InterviewRequest, config: LLMConfig = Depends(llm_overrides)
+) -> InterviewResponse:
     """按 JD + 简历生成 8 道面试题：3 项目深挖 + 3 短板追问 + 2 场景设计。"""
     try:
-        return generate_interview_questions(request.job_title, request.jd_text)
+        return generate_interview_questions(
+            request.job_title, request.jd_text, config=config
+        )
     except ConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except LLMServiceError as exc:

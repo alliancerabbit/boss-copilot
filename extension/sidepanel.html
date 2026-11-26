@@ -205,6 +205,37 @@
         border-color: #b9ccff;
       }
 
+      /* 表单字段：API 设置面板复用 */
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .field-label {
+        font-size: 11.5px;
+        color: var(--muted);
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfcfd;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 12.5px;
+      }
+
+      .field input:focus,
+      .field select:focus {
+        outline: 2px solid #dbe6ff;
+        border-color: #b9ccff;
+      }
+
       .jobline {
         display: flex;
         align-items: center;
@@ -493,6 +524,60 @@
             placeholder="在这里粘贴简历全文，或点上方按钮上传 .pdf / .md / .txt（PDF 由后端自动提取文字）"
           ></textarea>
           <button id="saveResumeBtn" class="btn" type="button">保存简历</button>
+        </div>
+      </details>
+
+      <details id="apiPanel" class="resume-card">
+        <summary>
+          <span class="resume-title">API 设置</span>
+          <span id="apiBadge" class="badge warn">后端默认</span>
+        </summary>
+        <div class="resume-body">
+          <label class="field">
+            <span class="field-label">服务商预设</span>
+            <select id="providerSelect">
+              <option value="zhipu">智谱清言（免费推荐）</option>
+              <option value="siliconflow">硅基流动（免费开源模型）</option>
+              <option value="deepseek">DeepSeek（默认）</option>
+              <option value="volcengine">豆包 / 火山引擎</option>
+              <option value="custom">自定义（OpenAI 兼容）</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">API Key</span>
+            <input
+              id="apiKeyInput"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="留空则使用后端 .env"
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">Base URL</span>
+            <input
+              id="baseUrlInput"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://api.deepseek.com"
+            />
+          </label>
+          <label class="field">
+            <span class="field-label">Model Name</span>
+            <input
+              id="modelInput"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="deepseek-chat"
+            />
+          </label>
+          <div class="resume-actions">
+            <button id="testApiBtn" class="btn ghost small" type="button">测试连接</button>
+            <button id="saveApiBtn" class="btn small" type="button">保存配置</button>
+          </div>
+          <span id="apiHint" class="resume-hint">仅保存在本机浏览器，不会上传</span>
         </div>
       </details>
 

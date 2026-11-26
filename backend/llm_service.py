@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -41,6 +43,28 @@ class ConfigurationError(RuntimeError):
 
 class LLMServiceError(RuntimeError):
     """模型调用失败，或返回内容无法通过结构校验。"""
+
+
+@dataclass(frozen=True)
+class LLMConfig:
+    """单次请求携带的模型配置。字段为空表示"该项用 .env 的默认值"。"""
+
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+def resolve_config(override: LLMConfig | None = None) -> LLMConfig:
+    """请求头优先，缺哪项就用 .env 补哪项。"""
+    load_dotenv(ENV_PATH)
+    override = override or LLMConfig()
+    return LLMConfig(
+        api_key=override.api_key.strip() or os.getenv("DEEPSEEK_API_KEY", "").strip(),
+        base_url=override.base_url.strip()
+        or os.getenv("DEEPSEEK_BASE_URL", "").strip()
+        or DEFAULT_BASE_URL,
+        model=override.model.strip() or os.getenv("DEEPSEEK_MODEL", "").strip() or DEFAULT_MODEL,
+    )
 
 
 SYSTEM_PROMPT = """你是一位资深技术招聘顾问，擅长把候选人的真实经历与岗位 JD 做精准匹配。
@@ -90,15 +114,20 @@ def load_resume() -> str:
     return text
 
 
-def _build_client() -> OpenAI:
-    load_dotenv(ENV_PATH)  # 放在调用时加载，改完 .env 不必重启进程
-    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-    if not api_key:
+def _build_client(config: LLMConfig | None = None) -> OpenAI:
+    """每次调用现建客户端：配置可能来自本次请求头，不能缓存。"""
+    resolved = resolve_config(config)
+    if not resolved.api_key:
         raise ConfigurationError(
-            "未配置 DEEPSEEK_API_KEY。请复制 backend/.env.example 为 backend/.env 并填入密钥。"
+            "未配置 API Key：请在侧边栏「API 设置」里填写，"
+            "或复制 backend/.env.example 为 backend/.env 后填入。"
         )
-    base_url = os.getenv("DEEPSEEK_BASE_URL", "").strip() or DEFAULT_BASE_URL
-    return OpenAI(api_key=api_key, base_url=base_url, timeout=60.0, max_retries=1)
+    return OpenAI(
+        api_key=resolved.api_key,
+        base_url=resolved.base_url,
+        timeout=60.0,
+        max_retries=1,
+    )
 
 
 def _extract_json(raw: str) -> dict:
@@ -120,11 +149,13 @@ def _extract_json(raw: str) -> dict:
     return payload
 
 
-def analyze_jd(job_title: str, jd_text: str) -> AnalyzeResponse:
+def analyze_jd(
+    job_title: str, jd_text: str, config: LLMConfig | None = None
+) -> AnalyzeResponse:
     """分析岗位与简历的匹配度。失败时抛 ConfigurationError / LLMServiceError。"""
     resume = load_resume()
-    client = _build_client()
-    model = os.getenv("DEEPSEEK_MODEL", "").strip() or DEFAULT_MODEL
+    client = _build_client(config)
+    model = resolve_config(config).model
 
     base_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -172,22 +203,19 @@ def analyze_jd(job_title: str, jd_text: str) -> AnalyzeResponse:
     raise LLMServiceError(f"模型输出未通过结构校验（已尝试 {MAX_ATTEMPTS} 次）：{last_error}")
 
 
-def _model_name() -> str:
-    return os.getenv("DEEPSEEK_MODEL", "").strip() or DEFAULT_MODEL
-
-
 def chat_json(
     system_prompt: str,
     user_prompt: str,
     *,
     max_tokens: int = 1500,
     temperature: float = 0.7,
+    config: LLMConfig | None = None,
 ) -> dict:
     """单次 JSON Mode 调用并解析为 dict。供出题、技能抽取等场景复用。"""
-    client = _build_client()
+    client = _build_client(config)
     try:
         completion = client.chat.completions.create(
-            model=_model_name(),
+            model=resolve_config(config).model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -238,7 +266,9 @@ INTERVIEW_USER_TEMPLATE = """【岗位】
 请按系统要求输出 JSON。"""
 
 
-def generate_interview_questions(job_title: str, jd_text: str) -> InterviewResponse:
+def generate_interview_questions(
+    job_title: str, jd_text: str, config: LLMConfig | None = None
+) -> InterviewResponse:
     """生成 8 道面试题（3 项目深挖 + 3 短板追问 + 2 场景设计）。"""
     resume = load_resume()
     base_prompt = INTERVIEW_USER_TEMPLATE.format(
@@ -255,7 +285,11 @@ def generate_interview_questions(job_title: str, jd_text: str) -> InterviewRespo
             )
         try:
             payload = chat_json(
-                INTERVIEW_SYSTEM_PROMPT, prompt, max_tokens=2200, temperature=0.6
+                INTERVIEW_SYSTEM_PROMPT,
+                prompt,
+                max_tokens=2200,
+                temperature=0.6,
+                config=config,
             )
             return InterviewResponse.model_validate(payload)
         except (LLMServiceError, ValidationError, ValueError) as exc:
@@ -312,3 +346,51 @@ def extract_skills(text: str, *, max_skills: int = 12) -> list[str]:
         if len(skills) >= max_skills:
             break
     return skills
+
+
+def _short_error(message: str, limit: int = 300) -> str:
+    text = " ".join((message or "").split())
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def probe_connection(config: LLMConfig | None = None) -> dict:
+    """发一句 "hi" 探活，只验证 Key / Base URL / 模型名是否可用。
+
+    返回 {ok, model, latency_ms, error}。失败不抛异常——前端需要原始报错文案。
+    """
+    resolved = resolve_config(config)
+    if not resolved.api_key:
+        return {
+            "ok": False,
+            "model": resolved.model,
+            "latency_ms": 0,
+            "error": "未提供 API Key，本地 .env 也没有配置。",
+        }
+
+    started = time.perf_counter()
+    try:
+        client = OpenAI(
+            api_key=resolved.api_key,
+            base_url=resolved.base_url,
+            timeout=15.0,
+            max_retries=0,  # 探活要快，失败就报，不重试
+        )
+        client.chat.completions.create(
+            model=resolved.model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=5,
+        )
+    except Exception as exc:  # 探活要的是"为什么失败"，任何异常都转成文案
+        return {
+            "ok": False,
+            "model": resolved.model,
+            "latency_ms": int((time.perf_counter() - started) * 1000),
+            "error": _short_error(str(exc)),
+        }
+
+    return {
+        "ok": True,
+        "model": resolved.model,
+        "latency_ms": int((time.perf_counter() - started) * 1000),
+        "error": "",
+    }

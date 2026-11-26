@@ -32,12 +32,29 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`，`copy` 
 打开 Boss 直聘岗位详情页 → 点击工具栏图标 →「分析当前岗位」或「生成面试题」。
 若抓不到 JD，先在页面上用鼠标选中 JD 文本，再点一次按钮。
 
+## 自带 Key（BYOK）与免费模型
+
+**支持智谱 `glm-4-flash`、硅基流动等免费 API，开箱即用**：侧边栏顶部「API 设置」里切换服务商即可，不用改任何配置文件。
+
+| 预设 | Base URL | 默认模型 | 说明 |
+|---|---|---|---|
+| 智谱清言 | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` | 有免费额度，推荐先用这个 |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `Qwen/Qwen2.5-7B-Instruct` | 免费开源模型 |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` | 默认，需账户余额 |
+| 豆包 / 火山引擎 | `https://ark.cn-beijing.volces.com/api/v3` | 填接入点 ID（`ep-` 开头） | 注意不是模型名 |
+| 自定义 | 任意 OpenAI 兼容地址 | 任意 | — |
+
+- Key 只存在本机浏览器的 `chrome.storage.local`，不上传、不入库。
+- 不填 Key 时，后端自动回落到 `backend/.env` 的默认配置。
+- 配置通过 `X-API-Key` / `X-Base-URL` / `X-Model-Name` 三个请求头传给后端；「测试连接」会发一句 `hi` 验证 Key、地址与模型名是否可用。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/analyze` | JD + 简历 → 匹配度、3 条优势、2-3 条短板、3 条打招呼语 |
 | POST | `/api/interview` | JD + 简历 → 8 道面试题（3 项目深挖 / 3 短板追问 / 2 场景设计） |
+| POST | `/api/test-connection` | 用请求头里的配置发一句 `hi` 探活 |
 | GET | `/api/resume` | 读取当前简历 |
 | POST | `/api/resume` | 保存粘贴或微调后的简历 |
 | POST | `/api/resume/upload` | 上传 `.pdf` / `.md` / `.txt` 并解析写入 |

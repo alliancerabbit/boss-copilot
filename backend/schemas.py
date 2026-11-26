@@ -180,3 +180,12 @@ class ResumeState(BaseModel):
     exists: bool = Field(..., description="本地是否已有一份可用的简历")
     content: str = Field("", description="简历全文，未配置时为空字符串")
     chars: int = Field(0, description="字符数，便于前端判断是否需要重新配置")
+
+
+class TestConnectionResult(BaseModel):
+    """探活结果。失败也返回 200，让前端直接展示原始报错。"""
+
+    ok: bool = Field(..., description="Key / Base URL / 模型名 是否能正常调通")
+    model: str = Field("", description="本次实际使用的模型名")
+    latency_ms: int = Field(0, description="往返耗时（毫秒）")
+    error: str = Field("", description="失败原因，成功时为空")

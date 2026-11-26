@@ -7,7 +7,40 @@ const API_URL = "http://127.0.0.1:8000/api/analyze";
 const INTERVIEW_URL = "http://127.0.0.1:8000/api/interview";
 const RESUME_URL = "http://127.0.0.1:8000/api/resume";
 const UPLOAD_URL = "http://127.0.0.1:8000/api/resume/upload";
+const TEST_CONNECTION_URL = "http://127.0.0.1:8000/api/test-connection";
+const API_STORAGE_KEY = "bossCopilotApiConfig";
 const COPY_RESET_MS = 1600;
+
+/** 服务商预设。选中后自动填充 Base URL 与 Model，用户仍可手改。 */
+const PROVIDERS = {
+  zhipu: {
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4-flash",
+    note: "glm-4-flash 有免费额度，注册智谱开放平台即可拿 Key",
+  },
+  siliconflow: {
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "Qwen/Qwen2.5-7B-Instruct",
+    note: "硅基流动提供免费开源模型，注册即可用",
+  },
+  deepseek: {
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-chat",
+    note: "默认后端配置，需要账户余额",
+  },
+  volcengine: {
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    model: "",
+    note: "Model 必须填接入点 ID（ep- 开头），不是模型名",
+  },
+  custom: {
+    baseUrl: "",
+    model: "",
+    note: "填任何 OpenAI 兼容服务的 Base URL 与模型名",
+  },
+};
+
+let apiConfig = { provider: "deepseek", apiKey: "", baseUrl: "", model: "" };
 
 const SOURCE_LABEL = {
   selection: "选中文本",
@@ -40,6 +73,15 @@ const els = {
   resumeHint: document.getElementById("resumeHint"),
   uploadBtn: document.getElementById("uploadBtn"),
   saveResumeBtn: document.getElementById("saveResumeBtn"),
+  apiPanel: document.getElementById("apiPanel"),
+  apiBadge: document.getElementById("apiBadge"),
+  providerSelect: document.getElementById("providerSelect"),
+  apiKeyInput: document.getElementById("apiKeyInput"),
+  baseUrlInput: document.getElementById("baseUrlInput"),
+  modelInput: document.getElementById("modelInput"),
+  testApiBtn: document.getElementById("testApiBtn"),
+  saveApiBtn: document.getElementById("saveApiBtn"),
+  apiHint: document.getElementById("apiHint"),
 };
 
 class ApiError extends Error {
@@ -257,12 +299,12 @@ async function analyze() {
     const job = await extractJob();
     setStatus(
       "info",
-      `已获取「${job.job_title}」（${SOURCE_LABEL[job.source] || "页面"}），DeepSeek 分析中…`
+      `已获取「${job.job_title}」（${SOURCE_LABEL[job.source] || "页面"}），模型分析中…`
     );
 
     const response = await fetch(API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeadersFrom(apiConfig, { "Content-Type": "application/json" }),
       body: JSON.stringify({ job_title: job.job_title, jd_text: job.jd_text }),
     });
 
@@ -339,7 +381,7 @@ async function generateInterview() {
 
     const response = await fetch(INTERVIEW_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeadersFrom(apiConfig, { "Content-Type": "application/json" }),
       body: JSON.stringify({ job_title: job.job_title, jd_text: job.jd_text }),
     });
 
@@ -440,6 +482,126 @@ async function uploadResume(file) {
     els.resumeFile.value = ""; // 允许再次选择同一个文件
   }
 }
+
+/** chrome.storage 在 file:// 预览里不存在，做一层兜底，避免整页脚本挂掉。 */
+const apiStorage = (() => {
+  try {
+    return chrome.storage && chrome.storage.local ? chrome.storage.local : null;
+  } catch {
+    return null;
+  }
+})();
+
+function updateApiBadge() {
+  const configured = Boolean(apiConfig.apiKey);
+  els.apiBadge.className = `badge ${configured ? "ok" : "warn"}`;
+  els.apiBadge.textContent = configured ? "已配置" : "后端默认";
+}
+
+function fillProviderPreset(providerKey) {
+  const preset = PROVIDERS[providerKey] || PROVIDERS.custom;
+  els.baseUrlInput.value = preset.baseUrl;
+  els.modelInput.value = preset.model;
+  els.apiHint.textContent = preset.note || "仅保存在本机浏览器，不会上传";
+}
+
+function renderApiForm() {
+  const providerKey = PROVIDERS[apiConfig.provider] ? apiConfig.provider : "deepseek";
+  els.providerSelect.value = providerKey;
+  els.apiKeyInput.value = apiConfig.apiKey || "";
+  els.baseUrlInput.value = apiConfig.baseUrl || PROVIDERS[providerKey].baseUrl;
+  els.modelInput.value = apiConfig.model || PROVIDERS[providerKey].model;
+  els.apiHint.textContent = PROVIDERS[providerKey].note || "仅保存在本机浏览器，不会上传";
+  updateApiBadge();
+}
+
+async function loadApiConfig() {
+  if (!apiStorage) return;
+  try {
+    const data = await apiStorage.get(API_STORAGE_KEY);
+    const saved = data && data[API_STORAGE_KEY];
+    if (saved && typeof saved === "object") apiConfig = { ...apiConfig, ...saved };
+  } catch {
+    /* 读不出来就用默认值，不影响其它功能 */
+  }
+}
+
+/** 把配置拼成后端认识的三个请求头；未填的字段不发，让后端回落 .env。 */
+function apiHeadersFrom(source, base = {}) {
+  const headers = { ...base };
+  if (source.apiKey) headers["X-API-Key"] = source.apiKey;
+  if (source.baseUrl) headers["X-Base-URL"] = source.baseUrl;
+  if (source.model) headers["X-Model-Name"] = source.model;
+  return headers;
+}
+
+async function saveApiConfig() {
+  apiConfig = {
+    provider: els.providerSelect.value,
+    apiKey: els.apiKeyInput.value.trim(),
+    baseUrl: els.baseUrlInput.value.trim(),
+    model: els.modelInput.value.trim(),
+  };
+
+  if (apiStorage) {
+    try {
+      await apiStorage.set({ [API_STORAGE_KEY]: apiConfig });
+    } catch {
+      setStatus("error", "写入浏览器存储失败，配置只在本次会话有效。");
+    }
+  }
+
+  updateApiBadge();
+  els.apiPanel.open = false;
+
+  const message = apiConfig.apiKey
+    ? "API 配置已保存到本机浏览器。"
+    : "已清空自定义 Key，将使用后端 .env 的配置。";
+  setStatus("info", message);
+  setTimeout(() => {
+    if (els.status.textContent === message) setStatus("", "");
+  }, 3000);
+}
+
+async function testApiConnection() {
+  // 用表单里的当前值测，而不是上次保存的值——避免"改了没保存就测"的误导
+  const draft = {
+    apiKey: els.apiKeyInput.value.trim(),
+    baseUrl: els.baseUrlInput.value.trim(),
+    model: els.modelInput.value.trim(),
+  };
+
+  els.testApiBtn.disabled = true;
+  els.testApiBtn.textContent = "测试中…";
+  els.apiHint.textContent = "正在发送 hi 测试…";
+
+  try {
+    const response = await fetch(TEST_CONNECTION_URL, {
+      method: "POST",
+      headers: apiHeadersFrom(draft),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiError(response.status, data.detail);
+
+    els.apiHint.textContent = data.ok
+      ? `✓ 连接成功 · ${data.model} · ${data.latency_ms}ms`
+      : `✗ ${data.error || "连接失败"}`;
+  } catch (error) {
+    els.apiHint.textContent = `✗ ${describeError(error)}`;
+  } finally {
+    els.testApiBtn.disabled = false;
+    els.testApiBtn.textContent = "测试连接";
+  }
+}
+
+els.providerSelect.addEventListener("change", () => fillProviderPreset(els.providerSelect.value));
+els.saveApiBtn.addEventListener("click", saveApiConfig);
+els.testApiBtn.addEventListener("click", testApiConnection);
+
+(async () => {
+  await loadApiConfig();
+  renderApiForm();
+})();
 
 els.uploadBtn.addEventListener("click", () => els.resumeFile.click());
 els.resumeFile.addEventListener("change", () => {
