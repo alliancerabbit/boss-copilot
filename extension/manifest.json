@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "BossCopilot",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "在 Boss 直聘页面一键分析岗位匹配度，生成可直接发出的打招呼语。",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "tabs"],
@@ -9,11 +9,23 @@
     "http://127.0.0.1:8000/*",
     "https://*.zhipin.com/*"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "BossCopilot — 分析当前岗位"
+    "default_title": "BossCopilot — 分析当前岗位",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "side_panel": {
     "default_path": "sidepanel.html"
