@@ -44,7 +44,9 @@ let apiConfig = { provider: "deepseek", apiKey: "", baseUrl: "", model: "" };
 
 const SOURCE_LABEL = {
   selection: "选中文本",
+  "page-detail": "详情区",
   page: "页面抓取",
+  "list-no-detail": "列表页",
   "selection-short": "选中过短",
   none: "无内容",
 };
@@ -171,7 +173,11 @@ async function extractJob() {
   }
 
   if (!data || !data.jd_text) {
-    throw new Error("没有抓到岗位描述。请在页面上用鼠标选中 JD 正文，再点一次「分析当前岗位」。");
+    const message =
+      data && data.source === "list-no-detail"
+        ? "这是岗位列表页，没找到右侧的职位详情。请先点开一个岗位让它加载出来，或用鼠标选中 JD 正文再试。"
+        : "没有抓到岗位描述。请在页面上用鼠标选中 JD 正文，再点一次「分析当前岗位」。";
+    throw new Error(message);
   }
 
   return data;
