@@ -85,6 +85,49 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`。
 
 读取 `backend/data/jobs.jsonl`（每次分析自动追加），并发抽取每条 JD 的技能标签，生成 `backend/data/market_report.md`：高频技能 Top 10、简历缺口对比、针对性修改建议。
 
+## 🔌 MCP Server 集成
+
+项目内置一个标准 [MCP](https://modelcontextprotocol.io/) Server（`mcp_server/server.py`），通过 **stdio** 传输，把本地的岗位分析历史与简历直接暴露给 Cursor、Claude Desktop、WorkBuddy 等主流 MCP 客户端。它**只读**，不会修改你的数据，也不额外发起网络请求。
+
+### 安装依赖
+
+```bash
+backend\.venv\Scripts\python.exe -m pip install -r mcp_server\requirements.txt
+```
+
+### 可用的 4 个 Tool
+
+| Tool | 参数 | 说明 |
+|---|---|---|
+| `list_saved_jobs` | `min_score=0`、`limit=20` | 列出分析过的岗位摘要（序号 / 岗位名 / 匹配分 / 时间），按分析时间倒序，可按最低分筛选（`limit` 上限 100） |
+| `get_job_detail` | `keyword` | 按岗位名关键词搜索，返回完整 JD、匹配优势、短板与打招呼语；同名岗位多次分析时返回最新一条并列出其他命中 |
+| `get_my_resume` | — | 返回当前 `backend/resume.md` 全文，未配置时提示先到插件里设置 |
+| `get_job_stats` | — | 分析次数与去重岗位数、平均匹配度、最高分岗位、高频短板 Top 5 |
+
+数据来自 `backend/data/jobs.jsonl` 与 `backend/resume.md`。路径按脚本自身位置推导，因此在任何工作目录下启动都能读到同一份数据。
+
+### 接入 Cursor
+
+在项目根目录创建 `.cursor/mcp.json`。仓库已提供模板 `.cursor/mcp.json.example`，复制改名即可：
+
+```json
+{
+  "mcpServers": {
+    "boss-copilot": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+      "args": ["${workspaceFolder}/mcp_server/server.py"]
+    }
+  }
+}
+```
+
+`${workspaceFolder}` 由 Cursor 解析为项目根目录，所以不用写死绝对路径。macOS / Linux 把 `Scripts/python.exe` 换成 `bin/python`。保存后重启 Cursor 或重新加载窗口，在 **Customize** 面板确认 `boss-copilot` 已启用。
+
+> `.cursor/mcp.json` 已被 `.gitignore` 忽略，本地路径不会推到 GitHub；想分享配置请改 `.cursor/mcp.json.example`。
+
+接好后可以直接在编辑器里问「我分析过哪些岗位」「这条 JD 我差在哪」「我的简历写了什么」。
+
 ## 🔒 隐私
 
 | 数据 | 存放位置 | 是否入库 |
