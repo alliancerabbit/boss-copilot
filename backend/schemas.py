@@ -153,3 +153,30 @@ class InterviewResponse(BaseModel):
 
     def all_questions(self) -> list[InterviewQuestion]:
         return [*self.project_questions, *self.gap_questions, *self.scenario_questions]
+
+
+class ResumeText(BaseModel):
+    """简历正文提交（侧边栏粘贴/微调后保存）。"""
+
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=50_000,
+        description="简历全文，纯文本或 Markdown",
+    )
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("简历内容不能为空")
+        return value
+
+
+class ResumeState(BaseModel):
+    """简历的当前状态。exists 为 false 时 content 为空字符串。"""
+
+    exists: bool = Field(..., description="本地是否已有一份可用的简历")
+    content: str = Field("", description="简历全文，未配置时为空字符串")
+    chars: int = Field(0, description="字符数，便于前端判断是否需要重新配置")

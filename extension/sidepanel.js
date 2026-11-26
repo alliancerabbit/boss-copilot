@@ -5,6 +5,8 @@
 
 const API_URL = "http://127.0.0.1:8000/api/analyze";
 const INTERVIEW_URL = "http://127.0.0.1:8000/api/interview";
+const RESUME_URL = "http://127.0.0.1:8000/api/resume";
+const UPLOAD_URL = "http://127.0.0.1:8000/api/resume/upload";
 const COPY_RESET_MS = 1600;
 
 const SOURCE_LABEL = {
@@ -31,6 +33,13 @@ const els = {
   interview: document.getElementById("interview"),
   interviewMeta: document.getElementById("interviewMeta"),
   interviewBody: document.getElementById("interviewBody"),
+  resumePanel: document.getElementById("resumePanel"),
+  resumeBadge: document.getElementById("resumeBadge"),
+  resumeText: document.getElementById("resumeText"),
+  resumeFile: document.getElementById("resumeFile"),
+  resumeHint: document.getElementById("resumeHint"),
+  uploadBtn: document.getElementById("uploadBtn"),
+  saveResumeBtn: document.getElementById("saveResumeBtn"),
 };
 
 class ApiError extends Error {
@@ -226,6 +235,7 @@ function describeError(error) {
     if (error.status === 503) return `后端缺少配置：${toMessage(error.detail)}`;
     if (error.status === 502) return `模型调用失败：${toMessage(error.detail)}`;
     if (error.status === 422) return "JD 文本太短或为空。请选中完整的职位描述段落（至少 10 个字）后重试。";
+    if (error.status === 400) return `文件或内容有问题：${toMessage(error.detail)}`;
     return `请求失败（HTTP ${error.status}）：${toMessage(error.detail)}`;
   }
   if (error instanceof TypeError) {
@@ -347,6 +357,97 @@ async function generateInterview() {
     setBusy(null);
   }
 }
+
+function setResumeBadge(kind, text) {
+  els.resumeBadge.className = `badge ${kind}`;
+  els.resumeBadge.textContent = text;
+}
+
+function applyResumeState(data, hint) {
+  els.resumeText.value = data.content || "";
+  setResumeBadge(data.exists ? "ok" : "warn", data.exists ? "已配置" : "未配置");
+  els.resumeHint.textContent = hint || (data.exists ? `${data.chars} 字` : "上传或粘贴后保存");
+}
+
+/** 打开侧边栏时拉取一次，回填文本框并刷新状态标签。 */
+async function loadResume() {
+  try {
+    const response = await fetch(RESUME_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    applyResumeState(await response.json());
+  } catch {
+    setResumeBadge("warn", "未配置");
+    els.resumeHint.textContent = "后端未连接";
+  }
+}
+
+async function saveResume() {
+  const content = els.resumeText.value.trim();
+  if (!content) {
+    setStatus("warn", "简历内容为空：先粘贴文本或上传文件。");
+    return;
+  }
+
+  els.saveResumeBtn.disabled = true;
+  els.saveResumeBtn.textContent = "保存中…";
+
+  try {
+    const response = await fetch(RESUME_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiError(response.status, data.detail);
+
+    applyResumeState(data, `${data.chars} 字`);
+    els.resumePanel.open = false;
+
+    const successText = "简历已保存，可以直接分析岗位了。";
+    setStatus("info", successText);
+    setTimeout(() => {
+      if (els.status.textContent === successText) setStatus("", "");
+    }, 3000);
+  } catch (error) {
+    setStatus("error", describeError(error));
+  } finally {
+    els.saveResumeBtn.disabled = false;
+    els.saveResumeBtn.textContent = "保存简历";
+  }
+}
+
+async function uploadResume(file) {
+  const form = new FormData();
+  form.append("file", file);
+
+  els.uploadBtn.disabled = true;
+  els.uploadBtn.textContent = "解析中…";
+  els.resumeHint.textContent = `正在解析 ${file.name}`;
+
+  try {
+    const response = await fetch(UPLOAD_URL, { method: "POST", body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiError(response.status, data.detail);
+
+    applyResumeState(data, `${file.name} · ${data.chars} 字`);
+    setStatus("info", "简历已解析并写入，可在文本框里微调后再次保存。");
+  } catch (error) {
+    setStatus("error", describeError(error));
+    els.resumeHint.textContent = "上传失败";
+  } finally {
+    els.uploadBtn.disabled = false;
+    els.uploadBtn.textContent = "上传 PDF / MD / TXT";
+    els.resumeFile.value = ""; // 允许再次选择同一个文件
+  }
+}
+
+els.uploadBtn.addEventListener("click", () => els.resumeFile.click());
+els.resumeFile.addEventListener("change", () => {
+  const file = els.resumeFile.files && els.resumeFile.files[0];
+  if (file) uploadResume(file);
+});
+els.saveResumeBtn.addEventListener("click", saveResume);
+loadResume();
 
 els.button.addEventListener("click", analyze);
 els.interviewBtn.addEventListener("click", generateInterview);
