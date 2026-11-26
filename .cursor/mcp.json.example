@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "boss-copilot": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+      "args": [
+        "${workspaceFolder}/mcp_server/server.py"
+      ]
+    }
+  }
+}

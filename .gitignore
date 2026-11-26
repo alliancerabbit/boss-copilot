@@ -15,3 +15,6 @@ Thumbs.db
 
 # WorkBuddy 本地工作数据
 .workbuddy/
+
+# Cursor 本地 MCP 配置（含个人机器绝对路径，模板见 .cursor/mcp.json.example）
+.cursor/mcp.json
