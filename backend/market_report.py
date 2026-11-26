@@ -23,6 +23,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+BACKEND_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BACKEND_DIR / ".venv" / "Scripts" / "python.exe"
+
 try:  # 作为包导入（python -m backend.market_report）
     from .llm_service import (
         RESUME_PATH,
@@ -33,16 +36,25 @@ try:  # 作为包导入（python -m backend.market_report）
         load_resume,
     )
 except ImportError:  # 直接运行脚本（python backend/market_report.py）
-    from llm_service import (
-        RESUME_PATH,
-        ConfigurationError,
-        LLMServiceError,
-        chat_json,
-        extract_skills,
-        load_resume,
-    )
-
-BACKEND_DIR = Path(__file__).resolve().parent
+    try:
+        from llm_service import (
+            RESUME_PATH,
+            ConfigurationError,
+            LLMServiceError,
+            chat_json,
+            extract_skills,
+            load_resume,
+        )
+    except ModuleNotFoundError as exc:
+        print(
+            f"× 缺少依赖：{exc.name}\n"
+            f"  用项目虚拟环境运行：\n"
+            f"    {VENV_PYTHON} {Path(__file__).name}\n"
+            f"  或先安装依赖：\n"
+            f"    {VENV_PYTHON} -m pip install -r {BACKEND_DIR / 'requirements.txt'}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
 DEFAULT_INPUT = BACKEND_DIR / "data" / "jobs.jsonl"
 DEFAULT_OUTPUT = BACKEND_DIR / "data" / "market_report.md"
 MIN_JD_LEN = 20
