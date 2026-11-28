@@ -150,10 +150,17 @@ def _extract_json(raw: str) -> dict:
 
 
 def analyze_jd(
-    job_title: str, jd_text: str, config: LLMConfig | None = None
+    job_title: str,
+    jd_text: str,
+    config: LLMConfig | None = None,
+    *,
+    resume: str | None = None,
 ) -> AnalyzeResponse:
-    """分析岗位与简历的匹配度。失败时抛 ConfigurationError / LLMServiceError。"""
-    resume = load_resume()
+    """分析岗位与简历的匹配度。失败时抛 ConfigurationError / LLMServiceError。
+
+    resume 由调用方传入时直接复用（反思循环里只读一次简历），不传则现读文件。
+    """
+    resume = resume if resume is not None else load_resume()
     client = _build_client(config)
     model = resolve_config(config).model
 

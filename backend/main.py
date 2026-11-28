@@ -7,6 +7,7 @@
 接口：
     POST /api/analyze        JD + 简历 → 匹配度、优势、短板、打招呼语
     POST /api/interview      JD + 简历 → 8 道面试题
+    POST /api/suggest-reply  聊天记录 → HR 意图 + 3 条不同风格回复
     POST /api/test-connection 用请求头里的 Key / Base URL / Model 探活
     GET  /api/resume         读取当前简历
     POST /api/resume         保存粘贴/微调后的简历
@@ -34,15 +35,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 try:  # 作为包导入（uvicorn backend.main:app）
+    from .agent_graph import analyze_with_review
     from .llm_service import (
         RESUME_PATH,
         ConfigurationError,
         LLMConfig,
         LLMServiceError,
-        analyze_jd,
         generate_interview_questions,
         probe_connection,
     )
+    from .reply_graph import suggest_replies
     from .schemas import (
         AnalyzeRequest,
         AnalyzeResponse,
@@ -50,25 +52,30 @@ try:  # 作为包导入（uvicorn backend.main:app）
         InterviewResponse,
         ResumeState,
         ResumeText,
+        SuggestReplyRequest,
+        SuggestReplyResponse,
         TestConnectionResult,
     )
 except ImportError:  # 从 backend/ 目录启动（uvicorn main:app）
-    from llm_service import (
+    from agent_graph import analyze_with_review  # type: ignore[no-redef]
+    from llm_service import (  # type: ignore[no-redef]
         RESUME_PATH,
         ConfigurationError,
         LLMConfig,
         LLMServiceError,
-        analyze_jd,
         generate_interview_questions,
         probe_connection,
     )
-    from schemas import (
+    from reply_graph import suggest_replies  # type: ignore[no-redef]
+    from schemas import (  # type: ignore[no-redef]
         AnalyzeRequest,
         AnalyzeResponse,
         InterviewRequest,
         InterviewResponse,
         ResumeState,
         ResumeText,
+        SuggestReplyRequest,
+        SuggestReplyResponse,
         TestConnectionResult,
     )
 
@@ -170,8 +177,13 @@ def test_connection(config: LLMConfig = Depends(llm_overrides)) -> TestConnectio
 def analyze(
     request: AnalyzeRequest, config: LLMConfig = Depends(llm_overrides)
 ) -> AnalyzeResponse:
+    """JD + 简历 → 匹配度、优势、短板、招呼语。
+
+    招呼语走 agent_graph 的「生成 → 评审 → 重写」反思循环，
+    出参与改造前完全一致，前端无感知。
+    """
     try:
-        result = analyze_jd(request.job_title, request.jd_text, config=config)
+        result = analyze_with_review(request.job_title, request.jd_text, config=config)
     except ConfigurationError as exc:
         # 缺密钥 / 缺简历：环境问题，让调用方知道该去配什么
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -201,6 +213,28 @@ def interview(
     try:
         return generate_interview_questions(
             request.job_title, request.jd_text, config=config
+        )
+    except ConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/suggest-reply", response_model=SuggestReplyResponse)
+def suggest_reply(
+    request: SuggestReplyRequest, config: LLMConfig = Depends(llm_overrides)
+) -> SuggestReplyResponse:
+    """聊天页：读最近对话 → 判断 HR 意图 → 出 3 条不同风格的短回复。
+
+    闲聊场景不强制要求简历：没配 resume.md 也能用，只是匹配类回复会弱一些。
+    """
+    history = [{"role": item.role, "content": item.content} for item in request.chat_history]
+    try:
+        return suggest_replies(
+            job_info=request.job_info.model_dump(),
+            history=history,
+            resume=request.resume,
+            config=config,
         )
     except ConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

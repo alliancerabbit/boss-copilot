@@ -493,21 +493,175 @@
         color: var(--muted);
         font-variant-numeric: tabular-nums;
       }
+
+      /* ---------- 顶部 Tab ---------- */
+      .tabs {
+        display: flex;
+        gap: 4px;
+        padding: 4px;
+        background: #eceff4;
+        border-radius: 10px;
+      }
+
+      .tab {
+        flex: 1;
+        height: 32px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+
+      .tab.active {
+        background: #fff;
+        color: var(--text);
+        box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+      }
+
+      .tab-panel > .actions { margin-bottom: 12px; }
+
+      /* ---------- 聊天回复 ---------- */
+      .chat-tip {
+        margin: 10px 0 12px;
+        font-size: 11.5px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+
+      .chat-context { margin-bottom: 12px; }
+      .chat-context .company {
+        margin: 2px 0 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .intent-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .intent-head h2 {
+        margin: 0;
+        font-size: 13px;
+      }
+
+      .strategy {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.65;
+        color: #3d4450;
+      }
+
+      .reply {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 8px;
+      }
+
+      .reply-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+
+      .style-tag {
+        font-size: 11px;
+        font-weight: 600;
+        color: #24468f;
+        background: #eef4ff;
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+
+      .reply-text {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.65;
+        word-break: break-word;
+      }
+
+      .reply-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .reply-actions button {
+        flex: 1;
+        height: 30px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #f8fafc;
+        color: var(--muted);
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .reply-actions button.primary {
+        background: #eef4ff;
+        border-color: #cfdcff;
+        color: var(--primary);
+      }
+
+      .reply-actions button:hover:not(:disabled) { filter: brightness(0.97); }
+      .reply-actions button:disabled { opacity: 0.6; cursor: default; }
+
+      #manualHrText {
+        width: 100%;
+        min-height: 80px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: #fbfcfd;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 12.5px;
+        line-height: 1.6;
+      }
+
+      #manualHrText:focus {
+        outline: 2px solid #dbe6ff;
+        border-color: #b9ccff;
+      }
     </style>
   </head>
   <body>
     <div class="topbar">
       <div class="brand">
         <h1>BossCopilot</h1>
-        <span>JD 匹配助手</span>
+        <span>JD 匹配 · 智能回复</span>
       </div>
-      <div class="actions">
-        <button id="analyzeBtn" class="btn" type="button">分析当前岗位</button>
-        <button id="interviewBtn" class="btn ghost" type="button">生成面试题</button>
-      </div>
+      <nav class="tabs" role="tablist">
+        <button id="tabJobBtn" class="tab active" type="button" role="tab" aria-selected="true">
+          岗位分析
+        </button>
+        <button id="tabChatBtn" class="tab" type="button" role="tab" aria-selected="false">
+          帮我回复
+        </button>
+      </nav>
     </div>
 
     <main>
+      <section id="jobPanel" class="tab-panel">
+        <div class="actions">
+          <button id="analyzeBtn" class="btn" type="button">分析当前岗位</button>
+          <button id="interviewBtn" class="btn ghost" type="button">生成面试题</button>
+        </div>
       <details id="resumePanel" class="resume-card">
         <summary>
           <span class="resume-title">我的简历</span>
@@ -622,6 +776,53 @@
           <span id="interviewMeta" class="badge"></span>
         </div>
         <div id="interviewBody"></div>
+      </section>
+      </section>
+
+      <section id="chatPanel" class="tab-panel" hidden>
+        <div class="actions">
+          <button id="readChatBtn" class="btn" type="button">读取当前对话并推荐回复</button>
+        </div>
+        <p class="chat-tip">
+          只读取当前聊天页，不会自动发送。填进输入框后请自己确认内容，再手动点发送。
+        </p>
+
+        <p id="chatStatus" class="status info" hidden></p>
+
+        <div id="chatContext" class="card chat-context" hidden>
+          <div class="jobline">
+            <strong id="chatJobTitle"></strong>
+            <span id="chatSalary" class="badge"></span>
+          </div>
+          <p id="chatCompany" class="company"></p>
+          <p id="chatCount" class="meta"></p>
+        </div>
+
+        <details id="manualPanel" class="resume-card">
+          <summary>
+            <span class="resume-title">抓不到记录？手动粘贴</span>
+            <span class="badge warn">兜底</span>
+          </summary>
+          <div class="resume-body">
+            <textarea
+              id="manualHrText"
+              placeholder="把 HR 最后一条消息粘贴到这里，例如：方便发份简历吗？"
+            ></textarea>
+            <button id="manualSubmitBtn" class="btn small" type="button">用这句话生成回复</button>
+            <span class="resume-hint">页面改版或聊天区懒加载读不到时，用这个兜底</span>
+          </div>
+        </details>
+
+        <section id="replyResult" hidden>
+          <div class="card intent-card">
+            <div class="intent-head">
+              <h2>HR 意图</h2>
+              <span id="intentBadge" class="badge"></span>
+            </div>
+            <p id="strategyText" class="strategy"></p>
+          </div>
+          <div id="replyCards"></div>
+        </section>
       </section>
     </main>
 

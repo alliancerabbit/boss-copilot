@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import re
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 MAX_GREETING_LEN = 60
@@ -43,6 +46,30 @@ class AnalyzeRequest(BaseModel):
         if not value:
             raise ValueError("不能为空白字符")
         return value
+
+
+def clean_greetings(items: list[str]) -> list[str]:
+    """校验并清洗打招呼语：非空、≤60 字、不含寒暄套话。
+
+    接口响应校验与 agent_graph 的「重写」节点共用同一把尺子，
+    避免两处规则漂移（评审说合格、响应却 422）。
+    """
+    cleaned: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            raise ValueError("打招呼语必须是字符串")
+        text = item.strip()
+        if not text:
+            raise ValueError("打招呼语不能为空")
+        if len(text) > MAX_GREETING_LEN:
+            raise ValueError(
+                f"打招呼语超过 {MAX_GREETING_LEN} 字（当前 {len(text)} 字）：{text[:20]}…"
+            )
+        for pattern in BANNED_GREETING_PATTERNS:
+            if pattern in text:
+                raise ValueError(f"打招呼语出现套话「{pattern}」：{text[:20]}…")
+        cleaned.append(text)
+    return cleaned
 
 
 class AnalyzeResponse(BaseModel):
@@ -84,20 +111,7 @@ class AnalyzeResponse(BaseModel):
     @field_validator("greetings")
     @classmethod
     def _check_greetings(cls, items: list[str]) -> list[str]:
-        cleaned: list[str] = []
-        for item in items:
-            text = item.strip()
-            if not text:
-                raise ValueError("打招呼语不能为空")
-            if len(text) > MAX_GREETING_LEN:
-                raise ValueError(
-                    f"打招呼语超过 {MAX_GREETING_LEN} 字（当前 {len(text)} 字）：{text[:20]}…"
-                )
-            for pattern in BANNED_GREETING_PATTERNS:
-                if pattern in text:
-                    raise ValueError(f"打招呼语出现套话「{pattern}」：{text[:20]}…")
-            cleaned.append(text)
-        return cleaned
+        return clean_greetings(items)
 
 
 class InterviewRequest(AnalyzeRequest):
@@ -189,3 +203,125 @@ class TestConnectionResult(BaseModel):
     model: str = Field("", description="本次实际使用的模型名")
     latency_ms: int = Field(0, description="往返耗时（毫秒）")
     error: str = Field("", description="失败原因，成功时为空")
+
+
+# ---------------------------------------------------------------------------
+# 聊天页智能回复：/api/suggest-reply
+# ---------------------------------------------------------------------------
+
+MAX_REPLY_LEN = 80
+
+# 聊天场景的禁用词：比打招呼语更严，"您好"这类客套在 Boss 聊天里同样假。
+BANNED_REPLY_PATTERNS = (
+    "贵司",
+    "深耕",
+    "共创辉煌",
+    "期待与您",
+    "您好",
+    "非常荣幸",
+    "很高兴认识您",
+    "感谢您的关注",
+    "期待您的回复",
+    "希望能有机会",
+    "非常感兴趣",
+    "祝您",
+)
+
+REPLY_STYLES = ("稳重礼貌", "强化匹配", "高情商反问")
+
+
+def _sentence_count(text: str) -> int:
+    """按句末标点切分，统计句子数。没有标点也算 1 句。
+
+    省略号「……」常被当作停顿而不是句末，算进去会把 2 句误判成 3 句，所以不切它。
+    """
+    parts = [part for part in re.split(r"[。！？!?]+", text) if part.strip()]
+    return max(1, len(parts))
+
+
+class ChatMessage(BaseModel):
+    """聊天记录里的一条消息。role 只有三种：HR、我、系统提示。"""
+
+    role: Literal["hr", "me", "system"] = Field(..., description="hr=对方，me=我，system=平台提示")
+    content: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("消息内容不能为空")
+        return text
+
+
+class JobInfo(BaseModel):
+    """聊天页顶部能读到的岗位信息。读不到就传空字符串，不影响生成。"""
+
+    company: str = Field("", max_length=100, description="公司名")
+    title: str = Field("", max_length=120, description="岗位名称")
+    salary: str = Field("", max_length=60, description="薪资范围原文")
+
+    @field_validator("company", "title", "salary")
+    @classmethod
+    def _strip(cls, value: str) -> str:
+        return value.strip()
+
+
+class SuggestReplyRequest(BaseModel):
+    """聊天页请求。resume 可选：不传就用后端 resume.md。"""
+
+    job_info: JobInfo = Field(default_factory=JobInfo)
+    chat_history: list[ChatMessage] = Field(
+        ..., min_length=1, max_length=30, description="按时间从旧到新，最近 10-15 条即可"
+    )
+    resume: str | None = Field(
+        None, max_length=20_000, description="可选，覆盖后端简历；不传则复用 resume.md"
+    )
+
+
+class ReplySuggestion(BaseModel):
+    """一条候选回复。硬约束：1-2 句、≤80 字、无套话。"""
+
+    style: str = Field(..., min_length=1, max_length=20)
+    content: str = Field(..., description="可直接发出的回复正文")
+
+    @field_validator("content")
+    @classmethod
+    def _check_content(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("回复不能为空")
+        if "\n" in text or "\r" in text:
+            raise ValueError("回复必须是一段连续的话，不能换行")
+        if len(text) > MAX_REPLY_LEN:
+            raise ValueError(f"回复超过 {MAX_REPLY_LEN} 字（当前 {len(text)} 字）：{text[:20]}…")
+        if _sentence_count(text) > 2:
+            raise ValueError(f"回复超过 2 句话：{text[:30]}…")
+        for pattern in BANNED_REPLY_PATTERNS:
+            if pattern in text:
+                raise ValueError(f"回复出现套话「{pattern}」：{text[:20]}…")
+        return text
+
+    @field_validator("style")
+    @classmethod
+    def _strip_style(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("风格名不能为空")
+        return text
+
+
+class SuggestReplyResponse(BaseModel):
+    """意图 + 策略 + 3 条不同风格的回复。"""
+
+    intent: str = Field(..., min_length=1, max_length=20, description="HR 意图标签")
+    strategy: str = Field("", max_length=120, description="一句话应对策略")
+    replies: list[ReplySuggestion] = Field(..., min_length=3, max_length=3)
+
+    @field_validator("replies")
+    @classmethod
+    def _distinct_styles(cls, items: list[ReplySuggestion]) -> list[ReplySuggestion]:
+        styles = [item.style for item in items]
+        if len(set(styles)) != len(styles):
+            raise ValueError("3 条回复的风格不能重复")
+        return items

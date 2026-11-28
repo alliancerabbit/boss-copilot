@@ -5,3 +5,5 @@ pydantic>=2.7.0
 python-dotenv>=1.0.0
 pypdf>=4.2.0
 python-multipart>=0.0.9
+# 招呼语文案的「生成 → 评审 → 重写」反思循环（StateGraph）
+langgraph>=1.2.0,<2.0.0

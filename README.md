@@ -11,6 +11,7 @@
 - **简历开箱即用**：侧边栏直接粘贴文本，或上传 `.pdf` / `.md` / `.txt`（PDF 由后端自动提取文字）。**隐私纯本地保存**，`backend/resume.md` 被 `.gitignore` 忽略，永不入库、不上传。
 - **BYOK 与免费模型**：内置智谱 `glm-4-flash`、硅基流动、DeepSeek、豆包预设，选中即填好地址与模型。**没有付费 Key 也能用**——注册智谱或硅基流动拿免费额度即可开跑。
 - **一键出 8 道面试题**：3 道深挖简历项目、3 道针对岗位短板、2 道业务场景设计，附答题结构。
+- **聊天页智能回复**：在 Boss 聊天页点一下，读出最近对话，先判 HR 意图（要简历 / 约面试 / 探薪资…），再给 3 条不同风格的短回复，可复制或一键填入输入框（**绝不自动发送**）。抓不到 DOM 时可手动粘贴兜底。
 - **批量市场趋势**：把积累的历史岗位读成「高频技能 Top 10 + 简历缺口 + 修改建议」报告。
 - **不依赖打包工具**：插件是纯 HTML/CSS/JS，后端只有 5 个 Python 文件，克隆即用。
 
@@ -69,6 +70,7 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`。
 |---|---|---|
 | POST | `/api/analyze` | JD + 简历 → 匹配度、3 条优势、2-3 条短板、3 条打招呼语 |
 | POST | `/api/interview` | JD + 简历 → 8 道面试题（3 / 3 / 2） |
+| POST | `/api/suggest-reply` | 聊天记录 → HR 意图 + 策略 + 3 条不同风格短回复 |
 | POST | `/api/test-connection` | 用请求头配置发 `hi` 探活，失败也返回 200 + 原文 |
 | GET | `/api/resume` | 读取当前简历 |
 | POST | `/api/resume` | 保存粘贴或微调后的简历 |
@@ -76,6 +78,47 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`。
 | GET | `/api/health` | 自检：简历是否存在、密钥是否已配 |
 
 服务默认只监听 `127.0.0.1:8000`，不对局域网暴露。
+
+### 打招呼语的「生成 → 评审 → 重写」循环
+
+`/api/analyze` 里的 3 条打招呼语由 LangGraph 状态机产出（`backend/agent_graph.py`）：
+
+```
+START → generate_node → review_node ─┬─ 通过，或已重写 2 次 → END
+              ↑                     │
+              └──── 不通过且还有额度 ─┘
+```
+
+- `generate_node`：首轮复用原来的完整分析（1 次调用拿到匹配度 / 优势 / 短板 / 3 条招呼语）；
+  被打回后只重写 3 条招呼语，并逐条对应评审意见。
+- `review_node`：先跑本地硬规则（条数、60 字上限、寒暄套话、重复），再让模型判"像不像 AI 套话、
+  有没有接住 JD 硬性要求"，输出 `passed / score / issues / suggestions`。
+- 条件边：通过或 `retry_count >= 2` 就收尾，否则带着修改意见打回重写。
+- 接口出参与改造前完全一致，Chrome 插件无需改动。
+
+终端里能直接看到每个节点的流转日志：
+
+```bash
+cd backend
+.venv\Scripts\python.exe demo_reflection.py               # 真实跑一次
+.venv\Scripts\python.exe demo_reflection.py --force-fail  # 强制首轮打回，看重写闭环
+.venv\Scripts\python.exe -m pytest tests/test_agent_graph.py -v   # 离线回归，不花钱
+```
+
+### 聊天页智能回复（`/api/suggest-reply`）
+
+侧边栏切到「帮我回复」，点一次「读取当前对话并推荐回复」：
+
+1. 仅在点击时注入 `extension/chat.js` 读屏，不做后台监听、不轮询；
+2. 读顶部岗位信息 + 最近 15 条消息，按 `hr / me / system` 分类；
+3. 后端 `backend/reply_graph.py` 跑两个节点：`intent_node` 判意图给策略 → `generate_replies_node` 出 3 条不同风格的短回复；
+4. 侧边栏展示「HR 意图」和 3 张卡，可「复制」或「填入输入框」，**不会点击发送按钮**。
+
+DOM 抓不到时（页面改版、聊天区虚拟滚动），侧边栏会自动展开「手动粘贴」，把 HR 最后一句话贴进去即可生成。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/suggest-reply -H "Content-Type: application/json" -d "{\"job_info\":{\"title\":\"AI 应用工程师\",\"company\":\"某公司\",\"salary\":\"20-30K\"},\"chat_history\":[{\"role\":\"hr\",\"content\":\"方便发份简历吗？\"}]}"
+```
 
 ## 📊 市场趋势报告
 
