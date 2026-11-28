@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BossCopilot",
-  "version": "1.1.0",
-  "description": "在 Boss 直聘页面一键分析岗位匹配度、生成打招呼语；聊天页可读取对话并推荐 3 条回复。",
+  "version": "1.2.0",
+  "description": "在 Boss 直聘页面一键分析岗位匹配度、生成打招呼语；聊天页可识别 HR 意图并推荐 3 条回复。",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "activeTab", "scripting", "tabs"],
   "host_permissions": [

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 MAX_GREETING_LEN = 60
 
@@ -227,7 +227,25 @@ BANNED_REPLY_PATTERNS = (
     "祝您",
 )
 
-REPLY_STYLES = ("稳重礼貌", "强化匹配", "高情商反问")
+# HR 意图只有 6 类，前后端与提示词共用这一份枚举，避免各写一套导致对不上。
+# 具体每类对应的回复风格与约束在 reply_graph.INTENT_PLAYBOOKS 里定义。
+IntentCode = Literal[
+    "REQUEST_INFO",
+    "PENDING_REVIEW",
+    "SCREENING",
+    "INTERVIEW_INVITE",
+    "REJECTED",
+    "GENERAL",
+]
+
+INTENT_LABELS: dict[str, str] = {
+    "REQUEST_INFO": "索要资料",
+    "PENDING_REVIEW": "评估挂起",
+    "SCREENING": "薪资背景探询",
+    "INTERVIEW_INVITE": "约面试",
+    "REJECTED": "婉拒",
+    "GENERAL": "日常沟通",
+}
 
 
 def _sentence_count(text: str) -> int:
@@ -312,11 +330,24 @@ class ReplySuggestion(BaseModel):
 
 
 class SuggestReplyResponse(BaseModel):
-    """意图 + 策略 + 3 条不同风格的回复。"""
+    """意图判定 + 潜台词 + 策略 + 3 条不同风格的回复。
 
-    intent: str = Field(..., min_length=1, max_length=20, description="HR 意图标签")
+    intent 固定为 6 类代号；intent_label 由服务端补全，前端直接拿去渲染徽章，
+    不需要在前端再维护一份中英对照。
+    """
+
+    intent: IntentCode = Field(..., description="HR 意图代号，6 类之一")
+    intent_label: str = Field("", max_length=20, description="意图中文标签，供前端徽章展示")
+    confidence: Literal["高", "中", "低"] = Field("中", description="意图判断置信度")
+    analysis: str = Field("", max_length=160, description="一句话潜台词分析")
     strategy: str = Field("", max_length=120, description="一句话应对策略")
     replies: list[ReplySuggestion] = Field(..., min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def _fill_label(self) -> "SuggestReplyResponse":
+        if not self.intent_label.strip():
+            self.intent_label = INTENT_LABELS.get(self.intent, "日常沟通")
+        return self
 
     @field_validator("replies")
     @classmethod

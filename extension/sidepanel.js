@@ -101,6 +101,8 @@ const els = {
   manualSubmitBtn: document.getElementById("manualSubmitBtn"),
   replyResult: document.getElementById("replyResult"),
   intentBadge: document.getElementById("intentBadge"),
+  intentConfidence: document.getElementById("intentConfidence"),
+  analysisText: document.getElementById("analysisText"),
   strategyText: document.getElementById("strategyText"),
   replyCards: document.getElementById("replyCards"),
 };
@@ -518,6 +520,16 @@ function isValidReplyPayload(data) {
   );
 }
 
+/** 6 类意图 → 徽章配色。后端若新增意图，落到 general 也不会白板。 */
+const INTENT_TONE = {
+  REQUEST_INFO: "request-info",
+  PENDING_REVIEW: "pending-review",
+  SCREENING: "screening",
+  INTERVIEW_INVITE: "interview-invite",
+  REJECTED: "rejected",
+  GENERAL: "general",
+};
+
 async function fillChatInput(text, button) {
   const original = button.textContent;
   button.disabled = true;
@@ -561,8 +573,11 @@ async function fillChatInput(text, button) {
 }
 
 function renderReplies(data) {
-  els.intentBadge.textContent = data.intent;
-  els.intentBadge.className = "badge ok";
+  // 先把局势讲清楚：意图徽章 + 置信度 + 一句潜台词，再让人挑话术
+  els.intentBadge.textContent = data.intent_label || data.intent;
+  els.intentBadge.className = `intent-badge ${INTENT_TONE[data.intent] || "general"}`;
+  els.intentConfidence.textContent = `置信 ${data.confidence || "中"}`;
+  els.analysisText.textContent = data.analysis || "（模型没有给出潜台词，按回复内容自行判断）";
   els.strategyText.textContent = data.strategy || "（模型没有给出策略，按回复内容判断）";
   els.replyCards.replaceChildren();
 
@@ -627,7 +642,8 @@ async function requestReplies(jobInfo, messages) {
 
   renderReplies(payload);
   const elapsed = (performance.now() - startedAt) / 1000;
-  setChatStatus("info", `意图：${payload.intent} · 3 条回复 · 用时 ${elapsed.toFixed(1)}s`);
+  const intentName = payload.intent_label || payload.intent;
+  setChatStatus("info", `意图：${intentName} · 3 条回复 · 用时 ${elapsed.toFixed(1)}s`);
 }
 
 function describeChatError(error) {

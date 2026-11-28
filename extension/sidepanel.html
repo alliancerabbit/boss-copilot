@@ -540,24 +540,100 @@
         color: var(--muted);
       }
 
+      .intent-card {
+        padding: 12px 13px;
+        margin-bottom: 10px;
+      }
+
       .intent-head {
         display: flex;
         align-items: center;
-        justify-content: space-between;
         gap: 8px;
-        margin-bottom: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 9px;
       }
 
-      .intent-head h2 {
-        margin: 0;
-        font-size: 13px;
+      /* 意图徽章：按 6 类意图换色，一眼看出当前局势是推进、挂起还是收尾 */
+      .intent-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 12.5px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: #eef2f7;
+        color: #4b5563;
       }
 
-      .strategy {
+      .intent-badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        margin-right: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .intent-badge.request-info { background: #eef4ff; color: #1d4ed8; }
+      .intent-badge.pending-review { background: #fff7ea; color: #8a5a12; }
+      .intent-badge.screening { background: #f3efff; color: #5b3ba8; }
+      .intent-badge.interview-invite { background: #e8f7ef; color: #12804a; }
+      .intent-badge.rejected { background: #fdeeee; color: #a12626; }
+      .intent-badge.general { background: #eef2f7; color: #4b5563; }
+
+      .confidence {
+        font-size: 11px;
+        color: var(--muted);
+        background: #f7f9fb;
+        border: 1px solid var(--line);
+        padding: 2px 8px;
+        border-radius: 999px;
+      }
+
+      .insight {
+        margin: 0;
+        padding: 9px 11px;
+        background: #f8fafc;
+        border-left: 3px solid #cfdcff;
+        border-radius: 0 8px 8px 0;
+      }
+
+      .insight-label {
+        display: block;
+        margin-bottom: 3px;
+        font-size: 10.5px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+      }
+
+      .analysis {
         margin: 0;
         font-size: 13px;
-        line-height: 1.65;
+        line-height: 1.6;
+        color: #1f2937;
+      }
+
+      .strategy-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        margin: 9px 0 0;
+        font-size: 12.5px;
+        line-height: 1.6;
         color: #3d4450;
+      }
+
+      .strategy-label {
+        flex: none;
+        margin-top: 1px;
+        padding: 1px 7px;
+        border-radius: 999px;
+        background: #eef4ff;
+        color: var(--primary);
+        font-size: 11px;
+        font-weight: 700;
       }
 
       .reply {
@@ -816,10 +892,17 @@
         <section id="replyResult" hidden>
           <div class="card intent-card">
             <div class="intent-head">
-              <h2>HR 意图</h2>
-              <span id="intentBadge" class="badge"></span>
+              <span id="intentBadge" class="intent-badge general">日常沟通</span>
+              <span id="intentConfidence" class="confidence">置信 中</span>
             </div>
-            <p id="strategyText" class="strategy"></p>
+            <div class="insight">
+              <span class="insight-label">潜台词</span>
+              <p id="analysisText" class="analysis"></p>
+            </div>
+            <p class="strategy-row">
+              <span class="strategy-label">怎么回</span>
+              <span id="strategyText"></span>
+            </p>
           </div>
           <div id="replyCards"></div>
         </section>

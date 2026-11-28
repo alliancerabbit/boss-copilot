@@ -11,7 +11,7 @@
 - **简历开箱即用**：侧边栏直接粘贴文本，或上传 `.pdf` / `.md` / `.txt`（PDF 由后端自动提取文字）。**隐私纯本地保存**，`backend/resume.md` 被 `.gitignore` 忽略，永不入库、不上传。
 - **BYOK 与免费模型**：内置智谱 `glm-4-flash`、硅基流动、DeepSeek、豆包预设，选中即填好地址与模型。**没有付费 Key 也能用**——注册智谱或硅基流动拿免费额度即可开跑。
 - **一键出 8 道面试题**：3 道深挖简历项目、3 道针对岗位短板、2 道业务场景设计，附答题结构。
-- **聊天页智能回复**：在 Boss 聊天页点一下，读出最近对话，先判 HR 意图（要简历 / 约面试 / 探薪资…），再给 3 条不同风格的短回复，可复制或一键填入输入框（**绝不自动发送**）。抓不到 DOM 时可手动粘贴兜底。
+- **聊天页智能回复**：在 Boss 聊天页点一下，读出最近对话，先把 HR 归入 6 类意图（索要资料 / 评估挂起 / 探薪资 / 约面试 / 婉拒 / 日常），再由 LangGraph 条件路由匹配对应的话术策略，给 3 条 1-2 句的短回复，可复制或一键填入输入框（**绝不自动发送**）。抓不到 DOM 时可手动粘贴兜底。
 - **批量市场趋势**：把积累的历史岗位读成「高频技能 Top 10 + 简历缺口 + 修改建议」报告。
 - **不依赖打包工具**：插件是纯 HTML/CSS/JS，后端只有 5 个 Python 文件，克隆即用。
 
@@ -70,7 +70,7 @@ macOS / Linux 把 `.venv\Scripts\python.exe` 换成 `.venv/bin/python`。
 |---|---|---|
 | POST | `/api/analyze` | JD + 简历 → 匹配度、3 条优势、2-3 条短板、3 条打招呼语 |
 | POST | `/api/interview` | JD + 简历 → 8 道面试题（3 / 3 / 2） |
-| POST | `/api/suggest-reply` | 聊天记录 → HR 意图 + 策略 + 3 条不同风格短回复 |
+| POST | `/api/suggest-reply` | 聊天记录 → 6 类意图 + 潜台词 + 策略 + 3 条差异化短回复 |
 | POST | `/api/test-connection` | 用请求头配置发 `hi` 探活，失败也返回 200 + 原文 |
 | GET | `/api/resume` | 读取当前简历 |
 | POST | `/api/resume` | 保存粘贴或微调后的简历 |
@@ -111,8 +111,30 @@ cd backend
 
 1. 仅在点击时注入 `extension/chat.js` 读屏，不做后台监听、不轮询；
 2. 读顶部岗位信息 + 最近 15 条消息，按 `hr / me / system` 分类；
-3. 后端 `backend/reply_graph.py` 跑两个节点：`intent_node` 判意图给策略 → `generate_replies_node` 出 3 条不同风格的短回复；
-4. 侧边栏展示「HR 意图」和 3 张卡，可「复制」或「填入输入框」，**不会点击发送按钮**。
+3. 后端 `backend/reply_graph.py` 先判 6 类意图，再按意图走条件路由，用各自的约束生成 3 条 1-2 句短回复；
+4. 侧边栏顶部先展示**意图徽章**（带颜色）与**一句话潜台词**，下面才是 3 张话术卡，可「复制」或「填入输入框」，**不会点击发送按钮**。
+
+```
+START → intent_node ─┬─ PENDING_REVIEW   → generate_hold_replies_node      ─┐
+                     ├─ SCREENING        → generate_screening_replies_node ─┤
+                     ├─ INTERVIEW_INVITE → generate_interview_replies_node  ─┼→ END
+                     └─ 其余三类         → generate_etiquette_replies_node ─┘
+```
+
+意图只有 6 类，每类对应一套回复约束：
+
+| 意图 | 中文徽章 | 回复约束 |
+|---|---|---|
+| `REQUEST_INFO` | 索要资料 | 立刻给到，最多补一个匹配点或确认下一步 |
+| `PENDING_REVIEW` | 评估挂起 | ≤40 字短句收尾，最多 1 条带问号，绝不纠缠 |
+| `SCREENING` | 薪资背景探询 | 锚定区间反问预算 / 能力对价 / 先聊岗位再谈薪 |
+| `INTERVIEW_INVITE` | 约面试 | 直接确认时间 + 顺带问形式与轮次 |
+| `REJECTED` | 婉拒 | 体面收尾，不辩解不追问 |
+| `GENERAL` | 日常沟通 | 顺着聊，保持温度，不长篇自我介绍 |
+
+`intent_node` 输出 `intent / confidence / analysis / strategy`：`analysis` 是一句潜台词（如"标准流程话术，大概率在走内部初筛，此时追问会显得急"），`strategy` 是一句行动建议，两者都会直接展示在侧边栏。模型输出解析不了时按关键词兜底判类，不额外调用模型。
+
+成本固定 2 次模型调用；任一分支的回复字数超限、问号过多、出现套话或内容重复，都会带着原因重试，最多 3 次。
 
 DOM 抓不到时（页面改版、聊天区虚拟滚动），侧边栏会自动展开「手动粘贴」，把 HR 最后一句话贴进去即可生成。
 
